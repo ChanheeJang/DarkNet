@@ -38,7 +38,7 @@ float *get_regression_values(char **labels, int n)
 void train_classifier(char *datacfg, char *cfgfile, char *weightfile, int *gpus, int ngpus, int clear)
 {
     int i;
-	clear = 1;  // weight load 한 후, 그 동안의 학습한 이미지 수 clear
+	 
     float avg_loss = -1;
     char *base = basecfg(cfgfile);
     printf("%s\n", base);
@@ -786,12 +786,20 @@ void label_classifier(char *datacfg, char *filename, char *weightfile)
         printf("%s\n", labels[ind]);
     }
 }
-
+//
+//#ifdef MAKE_DLL
+//network Parse_Network_CFG(char* cfgfile)
+//{
+//	return parse_network_cfg(cfgfile);
+//}
+//#endif
 
 void test_classifier(char *datacfg, char *cfgfile, char *weightfile, int target_layer)
 {
     int curr = 0;
-    network net = parse_network_cfg(cfgfile);
+    network net = parse_network_cfg(cfgfile); //네트워크 불러오기
+
+
     if(weightfile){
         load_weights(&net, weightfile);
     }
@@ -1140,7 +1148,7 @@ void demo_classifier(char *datacfg, char *cfgfile, char *weightfile, int cam_ind
 #endif
 }
 
-
+//#ifndef MAKE_DLL
 void run_classifier(int argc, char **argv)
 {
     if(argc < 4){
@@ -1152,6 +1160,7 @@ void run_classifier(int argc, char **argv)
     int *gpus = 0;
     int gpu = 0;
     int ngpus = 0;
+
     if(gpu_list){
         printf("%s\n", gpu_list);
         int len = strlen(gpu_list);
@@ -1182,17 +1191,61 @@ void run_classifier(int argc, char **argv)
     int layer = layer_s ? atoi(layer_s) : -1;
     if(0==strcmp(argv[2], "predict")) predict_classifier(data, cfg, weights, filename, top);
     else if(0==strcmp(argv[2], "try")) try_classifier(data, cfg, weights, filename, atoi(layer_s));
+
     else if(0==strcmp(argv[2], "train")) train_classifier(data, cfg, weights, gpus, ngpus, clear);
+
     else if(0==strcmp(argv[2], "demo")) demo_classifier(data, cfg, weights, cam_index, filename);
     else if(0==strcmp(argv[2], "gun")) gun_classifier(data, cfg, weights, cam_index, filename);
     else if(0==strcmp(argv[2], "threat")) threat_classifier(data, cfg, weights, cam_index, filename);
-    else if(0==strcmp(argv[2], "test")) test_classifier(data, cfg, weights, layer);
     else if(0==strcmp(argv[2], "label")) label_classifier(data, cfg, weights);
+
+    else if(0==strcmp(argv[2], "test")) test_classifier(data, cfg, weights, layer);
+
     else if(0==strcmp(argv[2], "valid")) validate_classifier_single(data, cfg, weights);
+
     else if(0==strcmp(argv[2], "validmulti")) validate_classifier_multi(data, cfg, weights);
     else if(0==strcmp(argv[2], "valid10")) validate_classifier_10(data, cfg, weights);
     else if(0==strcmp(argv[2], "validcrop")) validate_classifier_crop(data, cfg, weights);
     else if(0==strcmp(argv[2], "validfull")) validate_classifier_full(data, cfg, weights);
 }
+//#endif
 
-
+//
+//#ifdef MAKE_DLL
+//#include "darkWrapper.h"
+//void run_classifier(DarkNet dark)
+//{
+// 
+//	int gpu = gpu_index;
+//	int *gpus = &gpu;
+//	int ngpus = 1;
+//  
+//	int clear = dark.m_bClearImgSeen;
+//	char *data = dark.m_strDataPath;
+//	char *cfg = dark.m_strCfgPath;
+//	char *weights = (argc > 5) ? argv[5] : 0;
+//	char *filename = (argc > 6) ? argv[6] : 0;
+//	char *layer_s = (argc > 7) ? argv[7] : 0;
+//	int layer = layer_s ? atoi(layer_s) : -1;
+//
+//	if (0 == strcmp(argv[2], "predict")) predict_classifier(data, cfg, weights, filename, top);
+//	else if (0 == strcmp(argv[2], "try")) try_classifier(data, cfg, weights, filename, atoi(layer_s));
+//
+//	else if (0 == strcmp(argv[2], "train")) train_classifier(data, cfg, weights, gpus, ngpus, clear);
+//
+//	else if (0 == strcmp(argv[2], "demo")) demo_classifier(data, cfg, weights, cam_index, filename);
+//	else if (0 == strcmp(argv[2], "gun")) gun_classifier(data, cfg, weights, cam_index, filename);
+//	else if (0 == strcmp(argv[2], "threat")) threat_classifier(data, cfg, weights, cam_index, filename);
+//	else if (0 == strcmp(argv[2], "label")) label_classifier(data, cfg, weights);
+//
+//	else if (0 == strcmp(argv[2], "test")) test_classifier(data, cfg, weights, layer);
+//
+//	else if (0 == strcmp(argv[2], "valid")) validate_classifier_single(data, cfg, weights);
+//
+//	else if (0 == strcmp(argv[2], "validmulti")) validate_classifier_multi(data, cfg, weights);
+//	else if (0 == strcmp(argv[2], "valid10")) validate_classifier_10(data, cfg, weights);
+//	else if (0 == strcmp(argv[2], "validcrop")) validate_classifier_crop(data, cfg, weights);
+//	else if (0 == strcmp(argv[2], "validfull")) validate_classifier_full(data, cfg, weights);
+//}
+//#endif
+// 
