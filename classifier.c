@@ -493,7 +493,7 @@ void validate_classifier_full(char *datacfg, char *filename, char *weightfile)
 }
 
 
-void validate_classifier_single(char *datacfg, char *filename, char *weightfile, DarkNet dark)
+void validate_classifier_single(char *datacfg, char *filename, char *weightfile, DarkNet *dark)
 {
     int i, j;
     network net = parse_network_cfg(filename);
@@ -807,40 +807,40 @@ void label_classifier(char *datacfg, char *filename, char *weightfile)
 
 
 #ifdef MAKE_DLL
-void test_classifier(DarkNet dark)
+void test_classifier(DarkNet *dark)
 {
 	int curr = 0;
 	char datafile[100];
 	char cfgfile[100];
 	char weightfile[100];
 	char label[100];
-	sprintf(datafile, "C:/WISVision/ADC_Model/%s/%s.data", dark.m_strModelName, dark.m_strModelName);
-	sprintf(cfgfile, "C:/WISVision/ADC_Model/%s/%s.cfg", dark.m_strModelName, dark.m_strModelName);
-	sprintf(weightfile, "C:/WISVision/ADC_Model/%s/%s.weights", dark.m_strModelName, dark.m_strModelName);
-	sprintf(label, "C:/WISVision/ADC_Model/%s/%s.list", dark.m_strModelName, dark.m_strModelName);
+	sprintf(datafile, "C:/WISVision/ADC_Model/%s/%s.data", dark->m_strModelName, dark->m_strModelName);
+	sprintf(cfgfile, "C:/WISVision/ADC_Model/%s/%s.cfg", dark->m_strModelName, dark->m_strModelName);
+	sprintf(weightfile, "C:/WISVision/ADC_Model/%s/%s.weights", dark->m_strModelName, dark->m_strModelName);
+	sprintf(label, "C:/WISVision/ADC_Model/%s/%s.list", dark->m_strModelName, dark->m_strModelName);
 
-	if (!dark.m_bConfigLoaded)
+	if (!dark->m_bConfigLoaded)
 	{
-		dark.net = parse_network_cfg(cfgfile); //네트워크 불러오기
-		dark.m_bConfigLoaded = true;
+		dark->net = parse_network_cfg(cfgfile); //네트워크 불러오기
+		dark->m_bConfigLoaded = true;
 	}
 
-	if (!dark.m_bWeightLoaded && weightfile)
+	if (!dark->m_bWeightLoaded && weightfile)
 	{
-		load_weights(&dark.net, weightfile);
-		dark.m_bWeightLoaded = true;
+		load_weights(&dark->net, weightfile);
+		dark->m_bWeightLoaded = true;
 	}
  
 	list *options = read_data_cfg(datafile);
-	dark.m_nClassNum = option_find_int(options, "classes", 2);
+	dark->m_nClassNum = option_find_int(options, "classes", 2);
 
 	data val, buffer;
 	load_args args = { 0 };
-	args.w = dark.net.w;
-	args.h = dark.net.h;
+	args.w = dark->net.w;
+	args.h = dark->net.h;
 	args.paths = NULL; //  (char **)list_to_array(plist);
-	args.classes = dark.m_nClassNum;
-	args.n = dark.net.batch;
+	args.classes = dark->m_nClassNum;
+	args.n = dark->net.batch;
 	args.m = 0;
 	args.labels = 0;
 	args.d = &buffer;
@@ -852,80 +852,68 @@ void test_classifier(DarkNet dark)
 	clock_t time;
 	time = clock();
 
-	// Allocate memory 
- 
-	dark.predictionResult = make_matrix(dark.m_nTotalDefectImage, dark.m_nClassNum);
-
-	for (curr = 0; curr < dark.m_nTotalDefectImage; curr += dark.net.batch)
+	for (curr = 0; curr < dark->m_nTotalDefectImage; curr += dark->net.batch)
 	{
-		float **imgBatch = (float**)malloc(sizeof(float*) * dark.net.batch);
-		for (int i = 0; i < dark.net.batch; i++)
-		{
-			imgBatch[i] = (float*)malloc(sizeof(float) * dark.net.w * dark.net.h * dark.net.c);
-		}
+		// allocate image buffer 
+		float **imgBatch = (float**)malloc(sizeof(float*) * dark->net.batch);
+		for (int i = 0; i < dark->net.batch; i++)
+			imgBatch[i] = (float*)malloc(sizeof(float) * dark->net.w * dark->net.h * dark->net.c);
 
 		pthread_join(load_thread, 0);
 		val = buffer;
 		
-		if (curr < dark.m_nTotalDefectImage)
+		if (curr < dark->m_nTotalDefectImage)
 		{
-			if (curr + dark.net.batch > dark.m_nTotalDefectImage) args.n = dark.m_nTotalDefectImage - curr;
+			if (curr + dark->net.batch > dark->m_nTotalDefectImage) args.n = dark->m_nTotalDefectImage - curr;
 			load_thread = load_data_in_thread(args);
 		}
 		//fprintf(stderr, "Loaded: %d images in %lf seconds\n", val.X.rows, sec(clock() - time));
 
-		parseImgDataCV(dark.m_ppDefectImg, dark.m_nDefectImgWidth, dark.m_nDefectImgHeight, imgBatch, curr, dark.net.batch, dark.net.w, true);
+		//Resize Image Data to Fit Current Network
+		extractImageBatch(dark->m_ppDefectImg, dark->m_nDefectImgWidth, dark->m_nDefectImgHeight, imgBatch, curr, dark->net.batch, dark->net.w, true);
 
 		val.X.rows = args.n;
-		val.X.cols = dark.net.w*dark.net.h*dark.net.c;
+		val.X.cols = dark->net.w*dark->net.h*dark->net.c;
 		val.X.vals = calloc(val.X.rows, sizeof(float*));
 		val.X.vals = imgBatch;
 
-		matrix pred = network_predict_data(dark.net, val);
-		
+		// Image Classification
+		matrix pred = network_predict_data(dark->net, val);
+
+		// Save Prediction Result to send back to VisionWorks
 		for (int i = 0; i < pred.rows; ++i)
 		{
-			//printf("img #.%3d", i+ curr);
 			for (int j = 0; j < pred.cols; ++j)
 			{
-				//printf("   %0.3f", pred.vals[i][j]);
-				dark.predictionResult.vals[curr+i][j] = pred.vals[i][j];
+				dark->predictionResult[curr+i][j]= pred.vals[i][j];
 			}
-			//printf("\n");
 		}
 
 		// Free allocated memory
 		free_matrix(pred);
 		free_data(val);
 	}
-		fprintf(stderr, "%lf seconds, %d images, %d total\n", sec(clock() - time), val.X.rows, curr - dark.net.batch + val.X.rows);
-
-		for (int i = 0; i < dark.m_nTotalDefectImage; ++i)
-		{
-			printf("\nPrediction Result #.%3d", i);
-			for (int j = 0; j < dark.m_nClassNum; ++j)
-			{
-				printf("   %0.3f", dark.predictionResult.vals[i][j]);
-			}
-		}
-		free_network(dark.net);  // free GPU memory
+		//fprintf(stderr, "%lf seconds, %d images, %d total\n", sec(clock() - time), val.X.rows, curr - dark->net.batch + val.X.rows);
+	
+	// free GPU memory
+	free_network(dark->net);  
 }
 
 #else
-void test_classifier(char *datacfg, char *cfgfile, char *weightfile, DarkNet dark)
+void test_classifier(char *datacfg, char *cfgfile, char *weightfile, DarkNet *dark)
 {
     int curr = 0;
 	network net;
-	if (!dark.m_bConfigLoaded)
+	if (!dark->m_bConfigLoaded)
 	{
 		net = parse_network_cfg(cfgfile); //네트워크 불러오기
-		dark.m_bConfigLoaded = true;
+		dark->m_bConfigLoaded = true;
 	}
  
-    if(!dark.m_bWeightLoaded && weightfile)
+    if(!dark->m_bWeightLoaded && weightfile)
 	{
         load_weights(&net, weightfile);
-		dark.m_bWeightLoaded = true;
+		dark->m_bWeightLoaded = true;
 	}
 
     srand(time(0));
@@ -946,7 +934,7 @@ void test_classifier(char *datacfg, char *cfgfile, char *weightfile, DarkNet dar
     args.w = net.w;
     args.h = net.h;
     args.paths = paths;
-    args.classes = dark.m_nClassNum;
+    args.classes = dark->m_nClassNum;
     args.n = net.batch;
     args.m = 0;
     args.labels = 0;
@@ -954,16 +942,14 @@ void test_classifier(char *datacfg, char *cfgfile, char *weightfile, DarkNet dar
     args.type = OLD_CLASSIFICATION_DATA;
 
     pthread_t load_thread = load_data_in_thread(args);
-	m = 68;
+	m = 102;
 
-	float **imgBatch = (float**)malloc(sizeof(float*) * dark.net.batch);
-	for (int i = 0; i < dark.net.batch; i++)
+    for(curr = 0; curr < m+net.batch-1; curr += net.batch)
 	{
-		imgBatch[i] = (float*)malloc(sizeof(float) * dark.net.w * dark.net.h * dark.net.c);
-	}
+		float **imgBatch = (float**)malloc(sizeof(float*) * dark->net.batch);
+		for (int i = 0; i < dark->net.batch; i++)
+			imgBatch[i] = (float*)malloc(sizeof(float) * dark->net.w * dark->net.h * dark->net.c);
 
-    for(curr = 0; curr < m; curr += net.batch)
-	{
         time=clock();
 
         pthread_join(load_thread, 0);
@@ -978,16 +964,17 @@ void test_classifier(char *datacfg, char *cfgfile, char *weightfile, DarkNet dar
         }
         fprintf(stderr, "Loaded: %d images in %lf seconds\n", val.X.rows, sec(clock()-time));
 
-		dark.net.batch = 64;
+		dark->net.batch = 64;
 
-	    time=clock();
+	    time=clock();                                   
+		val.X.rows = args.n;
         matrix pred = network_predict_data(net, val);
  
 
 		int i, j;
         for(i = 0; i < pred.rows; ++i)
 		{
-			printf("   || prediction :  ");
+			printf("   || prediction #.%d :  ",i + curr);
             for(j = 0; j < pred.cols; ++j){
                 printf("   %0.3f", pred.vals[i][j]);
             }
@@ -996,7 +983,7 @@ void test_classifier(char *datacfg, char *cfgfile, char *weightfile, DarkNet dar
 
         free_matrix(pred);
 
-        fprintf(stderr, "%lf seconds, %d images, %d total\n", sec(clock()-time), val.X.rows, curr);
+        fprintf(stderr, "%lf seconds, %d images, %d total\n", sec(clock()-time), val.X.rows, curr+dark->net.batch);
         free_data(val);
     }
 	printf("Clear CUDA MEMORY?? \n");
@@ -1286,7 +1273,7 @@ void demo_classifier(char *datacfg, char *cfgfile, char *weightfile, int cam_ind
 }
 
 //#ifndef MAKE_DLL
-void run_classifier(int argc, char **argv, DarkNet dark)
+void run_classifier(int argc, char **argv, DarkNet *dark)
 {
     if(argc < 4){
         fprintf(stderr, "usage: %s %s [train/test/valid] [cfg] [weights (optional)]\n", argv[0], argv[1]);

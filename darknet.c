@@ -372,36 +372,30 @@ __declspec(dllexport) void myTest(char* dataFile, char* cfgFile, char* weightFil
 }
 #endif
 
-
-__declspec(dllexport)  void parseImgData(unsigned char* imgData, int width, int height, int channel,int defectN)
+__declspec(dllexport) void testParse(float** imgData, int size)
 {
-	int cropPad = 80;
-	image out = make_image(240, 240, 3);
+	image out = make_image(size, size, 3);
 	char saveName[100];
 	const char* path = "C:/Users/ati/Documents/ChanheeJean/vision2dark/";
-
 	for (int k = 0; k < 64; k++)
 	{
 		int count = 0;
-		int tt = 0;
-		for (int i = 0; i < height; i += 2)
+		for (int i = 0; i < size*size; ++i)
 		{
-			for (int j = cropPad; j < width - cropPad + 1; ++j)
-			{
-				//tt = ((imgData[k])[(width*i) + 2 * j] + (imgData[k])[(width*i) + 2 * j + 1]) / (2.*255.);
-				out.data[count] = tt;
-				out.data[count + 1] = tt;
-				out.data[count + 2] = tt;
-				count += 3;
-			}
+			out.data[count] = imgData[k][i];
+			out.data[size*size + count] = imgData[k][i + 1];
+			out.data[size*size * 2 + count++] = imgData[k][i + 2];
 		}
-		//sprintf(saveName, "%s%d", path, k);
-		//save_image_png(out, saveName);
+
+		sprintf(saveName, "%s%d", path, k);
+		save_image_png(out, saveName);
 	}
+	printf("parsed_Image: %f__%f__%f\n", imgData[0][99], imgData[0][100], imgData[0][101]);
+
 }
-
-
-float** parseImgDataCV(unsigned char** imgData, int width, int height, float** returnpp, int batchStart, int batchSize, int dstSize, bool normalize)
+#endif
+ 
+float** extractImageBatch(unsigned char** imgData, int width, int height, float** returnpp, int batchStart, int batchSize, int dstSize, bool normalize)
 {
 	int cropPad,roiSize_1st;
 	if (width > height)
@@ -421,7 +415,7 @@ float** parseImgDataCV(unsigned char** imgData, int width, int height, float** r
 	int batchCount = 0;
 
 	image cropImg = make_image(width - 2*cropPad, height, 3);
-	for (int k = batchStart; k < batchSize+ batchStart; k++,batchCount++)
+	for (int k = batchStart; k < batchStart + batchSize ; k++,batchCount++)
 	{
 		for (int i = 0; i < height; ++i)
 		{
@@ -434,48 +428,17 @@ float** parseImgDataCV(unsigned char** imgData, int width, int height, float** r
 		}
 		returnpp[batchCount]=(resize_image(cropImg, dstSize, dstSize)).data;
 	}
-/*
-	for (int i = 0; i<16; i++)
-	{
-		printf("cvtd data : ");
-		for (int j = 0; j<10; j++)
-		{
-			printf("%0.3f\t", (float)(returnpp[i][j]));
-		}
-		printf("\n");
-	}*/
 	free_image(cropImg);
 	return returnpp;
 }
 
 
-__declspec(dllexport) void testParse(float** imgData, int size)
-{
-	image out = make_image(size, size, 3);
-	char saveName[100];
-	const char* path = "C:/Users/ati/Documents/ChanheeJean/vision2dark/";
-	for (int k = 0; k < 64; k++)
-	{
-		int count = 0;
-		for (int i = 0; i < size*size; ++i)
-		{
-			out.data[count] = imgData[k][i];
-			out.data[size*size+count] = imgData[k][i+1];
-			out.data[size*size*2 + count++] = imgData[k][i+2];
-		}
 
-		sprintf(saveName, "%s%d", path, k);
-		save_image_png(out, saveName);
-	}
-	printf("parsed_Image: %f__%f__%f\n", imgData[0][99], imgData[0][100], imgData[0][101]);
-
-}
-#endif
 
 
 
 #ifdef MAKE_DLL
-__declspec(dllexport) float** InitDarkNet(char* modelName, int totalDefectImgNum, unsigned char** ppDefectImg, int defectImgWidth, int defectImgHeight)
+__declspec(dllexport) int DarkNetClassification(char* modelName, int totalDefectImgNum, unsigned char** ppDefectImg, int defectImgWidth, int defectImgHeight, float** predictResult)
 {
 	DarkNet Dark =
 	{ .m_bWeightLoaded = false,
@@ -493,7 +456,7 @@ __declspec(dllexport) float** InitDarkNet(char* modelName, int totalDefectImgNum
 		.m_nDefectImgWidth = defectImgWidth,
 		.m_nDefectImgHeight = defectImgHeight,
 
-		.predictionResult = NULL ,
+		.predictionResult =  predictResult,
 		.net=NULL};
 
 
@@ -524,9 +487,9 @@ __declspec(dllexport) float** InitDarkNet(char* modelName, int totalDefectImgNum
 	}
 	//printf("gpu:%d, gpus: %d", gpu, &gpus);
 
-	test_classifier(Dark);
+	test_classifier(&Dark);
 	
-	return Dark.predictionResult.vals;
+	return Dark.m_nClassNum;
 }
 #endif
 
