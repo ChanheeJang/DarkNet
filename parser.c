@@ -31,6 +31,9 @@
 #include "utils.h"
 #include <stdint.h>
 
+#pragma once
+#include "darkWrapper.h"
+
 typedef struct{
     char *type;
     list *options;

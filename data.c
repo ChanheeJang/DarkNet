@@ -7,6 +7,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#pragma once 
+#include "darkWrapper.h"
+
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
 list *get_paths(char *filename)
@@ -712,8 +715,7 @@ data load_data_detection(int n, char **paths, int m, int w, int h, int boxes, in
     free(random_paths);
     return d;
 }
-
-
+ 
 void *load_thread(void *ptr)
 {
 	//srand(time(0));
@@ -749,6 +751,7 @@ void *load_thread(void *ptr)
     return 0;
 }
 
+
 pthread_t load_data_in_thread(load_args args)
 {
     pthread_t thread;
@@ -757,6 +760,7 @@ pthread_t load_data_in_thread(load_args args)
     if(pthread_create(&thread, 0, load_thread, ptr)) error("Thread creation failed");
     return thread;
 }
+
 
 void *load_threads(void *ptr)
 {
@@ -814,13 +818,15 @@ data load_data_writing(char **paths, int n, int m, int w, int h, int out_w, int 
 
 data load_data_old(char **paths, int n, int m, char **labels, int k, int w, int h)
 {
-    if(m) paths = get_random_paths(paths, n, m);
-    data d = {0};
-    d.shallow = 0;
-    d.X = load_image_paths(paths, n, w, h);
-    d.y = load_labels_paths(paths, n, labels, k, 0);
-    if(m) free(paths);
-    return d;
+	if (m) paths = get_random_paths(paths, n, m);
+	data d = { 0 };
+	d.shallow = 0;
+#ifndef MAKE_DLL
+	d.X = load_image_paths(paths, n, w, h);   //dll 용으로 지우기 
+#endif
+	d.y = load_labels_paths(paths, n, labels, k, 0);
+	if (m) free(paths);
+	return d;
 }
 
 /*
