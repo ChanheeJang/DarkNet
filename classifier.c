@@ -883,39 +883,18 @@ void test_classifier(DarkNet dark)
 
 		matrix pred = network_predict_data(dark.net, val);
 		
-		int i, j;
-		for (i = 0; i < pred.rows; ++i)
+		for (int i = 0; i < pred.rows; ++i)
 		{
-			printf("img #.%3d", i+ curr);
-			for (j = 0; j < pred.cols; ++j)
+			//printf("img #.%3d", i+ curr);
+			for (int j = 0; j < pred.cols; ++j)
 			{
-				printf("   %0.3f", pred.vals[i][j]);
+				//printf("   %0.3f", pred.vals[i][j]);
 				dark.predictionResult.vals[curr+i][j] = pred.vals[i][j];
 			}
-			printf("\n");
-
-			//IplImage *tt= cvCreateImage(cvSize(args.w, args.h), IPL_DEPTH_8U, 3);
-			//for (int m = 0; m < args.h; m++)
-			//{
-			//	for (int n = 0; n < args.w; n++)
-			//	{
-			//		tt->imageData[m*args.w*3 + n*3  ] = (unsigned char)(val.X.vals[i][(m)*(args.w) + n ]*255);
-			//		tt->imageData[m*args.w*3 + n*3+1] = (unsigned char)(val.X.vals[i][(m)*(args.w) + n + (args.w)*(args.h)] * 255);
-			//		tt->imageData[m*args.w*3 + n*3+2] = (unsigned char)(val.X.vals[i][(m)*(args.w) + n + (args.w)*(args.h)*2] * 255);
-			//	}
-			//}
-	
-			//char save[100];
-			//sprintf(save, "%s%d.jpg","C:/Users/ati/Documents/ChanheeJean/vision2dark/",i + curr);
-			//int p[3];
-			//p[0]=CV_IMWRITE_JPEG_QUALITY;
-			//p[1]=100;
-			//p[2]=0;
-			//cvSaveImage(save, tt, p);
-			//cvShowImage("tt", tt);
-			//cvWaitKey(0);
+			//printf("\n");
 		}
-		//* Free allocated memory
+
+		// Free allocated memory
 		free_matrix(pred);
 		free_data(val);
 	}
@@ -929,6 +908,7 @@ void test_classifier(DarkNet dark)
 				printf("   %0.3f", dark.predictionResult.vals[i][j]);
 			}
 		}
+		free_network(dark.net);  // free GPU memory
 }
 
 #else
@@ -982,10 +962,6 @@ void test_classifier(char *datacfg, char *cfgfile, char *weightfile, DarkNet dar
 		imgBatch[i] = (float*)malloc(sizeof(float) * dark.net.w * dark.net.h * dark.net.c);
 	}
 
-	matrix predictionResult = make_matrix(dark.m_nTotalDefectImage, dark.m_nClassNum);
-
-
-
     for(curr = 0; curr < m; curr += net.batch)
 	{
         time=clock();
@@ -1006,7 +982,7 @@ void test_classifier(char *datacfg, char *cfgfile, char *weightfile, DarkNet dar
 
 	    time=clock();
         matrix pred = network_predict_data(net, val);
-		predictionResult.vals[curr] = pred.vals;
+ 
 
 		int i, j;
         for(i = 0; i < pred.rows; ++i)
@@ -1023,15 +999,9 @@ void test_classifier(char *datacfg, char *cfgfile, char *weightfile, DarkNet dar
         fprintf(stderr, "%lf seconds, %d images, %d total\n", sec(clock()-time), val.X.rows, curr);
         free_data(val);
     }
-	for (int i = 0; i < m; ++i)
-	{
-		printf("   || total :  ");
-		for (int j = 0; j < 7; ++j) {
-			printf("   %0.3f", predictionResult.vals[i][j]);
-		}
-		printf("\n");
-	}
-	free_matrix(predictionResult);
+	printf("Clear CUDA MEMORY?? \n");
+	system("pause");
+	free_network(net);
 	system("pause");
 }
 #endif

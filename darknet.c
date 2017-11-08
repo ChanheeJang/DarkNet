@@ -525,7 +525,7 @@ __declspec(dllexport) float** InitDarkNet(char* modelName, int totalDefectImgNum
 	//printf("gpu:%d, gpus: %d", gpu, &gpus);
 
 	test_classifier(Dark);
-
+	
 	return Dark.predictionResult.vals;
 }
 #endif
