@@ -28,7 +28,7 @@ extern void run_captcha(int argc, char **argv);
 extern void run_nightmare(int argc, char **argv);
 extern void run_dice(int argc, char **argv);
 extern void run_compare(int argc, char **argv);
-extern void run_classifier(int argc, char **argv, DarkNet dark);
+extern int run_classifier(int argc, char **argv, DarkNet dark);
 extern void run_char_rnn(int argc, char **argv);
 extern void run_vid_rnn(int argc, char **argv);
 extern void run_tag(int argc, char **argv);
@@ -438,7 +438,7 @@ float** extractImageBatch(unsigned char** imgData, int width, int height, float*
 
 
 #ifdef MAKE_DLL
-__declspec(dllexport) int DarkNetClassification(char* modelName, int totalDefectImgNum, unsigned char** ppDefectImg, int defectImgWidth, int defectImgHeight, float** predictResult)
+__declspec(dllexport) int DarkNetClassification(char* modelName, int totalDefectImgNum, unsigned char** ppDefectImg, int defectImgWidth, int defectImgHeight, int* classNum, float** predictResult)
 {
 	DarkNet Dark =
 	{ .m_bWeightLoaded = false,
@@ -447,7 +447,7 @@ __declspec(dllexport) int DarkNetClassification(char* modelName, int totalDefect
 		.m_bLabelListLoaded = false,
 		.m_bClearImgSeen = false,
 
-		.m_nClassNum = NULL,
+		.m_pClassNum = classNum,
 		.m_nImgSize = NULL,
 		.m_nTotalDefectImage = totalDefectImgNum,
 
@@ -486,22 +486,79 @@ __declspec(dllexport) int DarkNetClassification(char* modelName, int totalDefect
 		ngpus = 1;
 	}
 	//printf("gpu:%d, gpus: %d", gpu, &gpus);
-
-	test_classifier(&Dark);
 	
-	return Dark.m_nClassNum;
+	return  test_classifier(&Dark);
 }
 #endif
 
 
 
+
+
+
+#ifdef MAKE_DLL
+__declspec(dllexport) int DarkNetValidation(char* modelName, int totalDefectImgNum, unsigned char** ppDefectImg, int defectImgWidth, int defectImgHeight, int* classNum, float** predictResult)
+{
+	DarkNet Dark =
+	{ .m_bWeightLoaded = false,
+		.m_bConfigLoaded = false,
+		.m_bDataFileLoaded = false,
+		.m_bLabelListLoaded = false,
+		.m_bClearImgSeen = false,
+
+		.m_pClassNum = classNum,
+		.m_nImgSize = NULL,
+		.m_nTotalDefectImage = totalDefectImgNum,
+
+		.m_strModelName = modelName,
+		.m_ppDefectImg = ppDefectImg,
+		.m_nDefectImgWidth = defectImgWidth,
+		.m_nDefectImgHeight = defectImgHeight,
+
+		.predictionResult = predictResult,
+		.net = NULL };
+
+
+
+	char *gpu_list = 0;
+	int *gpus = 0;
+	int gpu = 0;
+	int ngpus = 0;
+
+	if (gpu_list) {
+		printf("%s\n", gpu_list);
+		int len = strlen(gpu_list);
+		ngpus = 1;
+		int i;
+		for (i = 0; i < len; ++i) {
+			if (gpu_list[i] == ',') ++ngpus;
+		}
+		gpus = calloc(ngpus, sizeof(int));
+		for (i = 0; i < ngpus; ++i) {
+			gpus[i] = atoi(gpu_list);
+			gpu_list = strchr(gpu_list, ',') + 1;
+		}
+	}
+	else {
+		gpu = gpu_index;
+		gpus = &gpu;
+		ngpus = 1;
+	}
+	//printf("gpu:%d, gpus: %d", gpu, &gpus);
+
+	return  test_classifier_valid(&Dark);
+}
+#endif
+
+
 #ifndef MAKE_DLL
 int main(int argc, char **argv)
 {
+	DarkError darkerror;
 	argv[1] = "classifier";
 	argv[2] = "test";
 	argv[3] = "C:/Users/ati/Desktop/darknet-master(AB-windows)/build/darknet/x64/myTest/myT.data";
-	argv[4] = "C:/Users/ati/Desktop/darknet-master(AB-windows)/build/darknet/x64/myTest/extraction.cfg";
+	argv[4] = "C:/Users/ati/Desktop/darknet-master(AB-windows)/build/darknet/x64/myTest/extractiodn.cfg";
 	argv[5] = "C:/Users/ati/Desktop/darknet-master(AB-windows)/build/darknet/x64/myTest/backup/extraction_160.weights";
 	argc = 6;
 
@@ -518,7 +575,7 @@ int main(int argc, char **argv)
 		.m_bLabelListLoaded = false,
 		.m_bClearImgSeen = false,
 
-		.m_nClassNum = NULL,
+		.m_pClassNum = NULL,
 		.m_nImgSize = NULL,
 		.m_nTotalDefectImage = NULL,
 
@@ -574,7 +631,7 @@ int main(int argc, char **argv)
     } else if (0 == strcmp(argv[1], "classifier"))
 	{
 /***************************************************/
-        run_classifier(argc, argv, Dark);
+		darkerror= run_classifier(argc, argv, Dark);
 /***************************************************/
     } else if (0 == strcmp(argv[1], "art")){
         run_art(argc, argv);
@@ -623,6 +680,9 @@ int main(int argc, char **argv)
     } else {
         fprintf(stderr, "Not an option: %s\n", argv[1]);
     }
+
+	printf("dark error #.%d",darkerror);
+	system("pause");
     return 0;
 }
 #endif

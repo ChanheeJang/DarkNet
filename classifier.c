@@ -821,25 +821,34 @@ void test_classifier(DarkNet *dark)
 
 	if (!dark->m_bConfigLoaded)
 	{
+		FILE *file = fopen(cfgfile, "r");
+		if (file == 0) return CFG_LOAD_FAIL;
+		else   fclose(file);
 		dark->net = parse_network_cfg(cfgfile); //네트워크 불러오기
 		dark->m_bConfigLoaded = true;
 	}
 
 	if (!dark->m_bWeightLoaded && weightfile)
 	{
+		FILE *file = fopen(weightfile, "r");
+		if (file == 0) return WEIGHT_LOAD_FAIL;
+		else   fclose(file);
 		load_weights(&dark->net, weightfile);
 		dark->m_bWeightLoaded = true;
 	}
  
+	FILE *file = fopen(datafile, "r");
+	if (file == 0) return DATA_LOAD_FAIL;
+	else   fclose(file);
 	list *options = read_data_cfg(datafile);
-	dark->m_nClassNum = option_find_int(options, "classes", 2);
+	*dark->m_pClassNum = option_find_int(options, "classes", 2);
 
 	data val, buffer;
 	load_args args = { 0 };
 	args.w = dark->net.w;
 	args.h = dark->net.h;
 	args.paths = NULL; //  (char **)list_to_array(plist);
-	args.classes = dark->m_nClassNum;
+	args.classes = *(dark->m_pClassNum);
 	args.n = dark->net.batch;
 	args.m = 0;
 	args.labels = 0;
@@ -896,22 +905,195 @@ void test_classifier(DarkNet *dark)
 		//fprintf(stderr, "%lf seconds, %d images, %d total\n", sec(clock() - time), val.X.rows, curr - dark->net.batch + val.X.rows);
 	
 	// free GPU memory
-	free_network(dark->net);  
+	free_network(dark->net); 
+	return SUCCESS;
 }
 
+
+
+int compare(const void * a, const void * b)
+{
+	return (*(int*)a - *(int*)b);
+}
+
+void test_classifier_valid(DarkNet *dark)
+{
+	int curr = 0;
+	char datafile[100];
+	char cfgfile[100];
+	char weightfile[100];
+	char label[100];
+	sprintf(datafile, "C:/WISVision/ADC_Model/%s/%s.data", dark->m_strModelName, dark->m_strModelName);
+	sprintf(cfgfile, "C:/WISVision/ADC_Model/%s/%s.cfg", dark->m_strModelName, dark->m_strModelName);
+	sprintf(weightfile, "C:/WISVision/ADC_Model/%s/%s.weights", dark->m_strModelName, dark->m_strModelName);
+	sprintf(label, "C:/WISVision/ADC_Model/%s/%s.list", dark->m_strModelName, dark->m_strModelName);
+
+	if (!dark->m_bConfigLoaded)
+	{
+		FILE *file = fopen(cfgfile, "r");
+		if (file == 0) return CFG_LOAD_FAIL;
+		else   fclose(file);
+		dark->net = parse_network_cfg(cfgfile); //네트워크 불러오기
+		dark->m_bConfigLoaded = true;
+	}
+
+	if (!dark->m_bWeightLoaded && weightfile)
+	{
+		FILE *file = fopen(weightfile, "r");
+		if (file == 0) return WEIGHT_LOAD_FAIL;
+		else   fclose(file);
+		load_weights(&dark->net, weightfile);
+		dark->m_bWeightLoaded = true;
+	}
+
+	FILE *file = fopen(datafile, "r");
+	if (file == 0) return DATA_LOAD_FAIL;
+	else   fclose(file);
+	list *options = read_data_cfg(datafile);
+	*dark->m_pClassNum = option_find_int(options, "classes", 2);
+
+	data val, buffer;
+	load_args args = { 0 };
+	args.w = dark->net.w;
+	args.h = dark->net.h;
+	args.paths = NULL; //  (char **)list_to_array(plist);
+	args.classes = *(dark->m_pClassNum);
+	args.n = dark->net.batch;
+	args.m = 0;
+	args.labels = 0;
+	args.d = &buffer;
+	args.type = OLD_CLASSIFICATION_DATA;
+
+	pthread_t load_thread = load_data_in_thread(args, dark);
+
+	srand(time(0));
+	clock_t time;
+	time = clock();
+	IplImage *img = cvCreateImage(cvSize(args.w, args.h), IPL_DEPTH_8U, 3);
+
+	char **labels = get_labels(label);
+
+	for (curr = 0; curr < dark->m_nTotalDefectImage; curr += dark->net.batch)
+	{
+		// allocate image buffer 
+		float **imgBatch = (float**)malloc(sizeof(float*) * dark->net.batch);
+		for (int i = 0; i < dark->net.batch; i++)
+			imgBatch[i] = (float*)malloc(sizeof(float) * dark->net.w * dark->net.h * dark->net.c);
+
+		pthread_join(load_thread, 0);
+		val = buffer;
+
+		if (curr < dark->m_nTotalDefectImage)
+		{
+			if (curr + dark->net.batch > dark->m_nTotalDefectImage) args.n = dark->m_nTotalDefectImage - curr;
+			load_thread = load_data_in_thread(args);
+		}
+		//fprintf(stderr, "Loaded: %d images in %lf seconds\n", val.X.rows, sec(clock() - time));
+
+		//Resize Image Data to Fit Current Network
+		extractImageBatch(dark->m_ppDefectImg, dark->m_nDefectImgWidth, dark->m_nDefectImgHeight, imgBatch, curr, dark->net.batch, dark->net.w, true);
+
+		val.X.rows = args.n;
+		val.X.cols = dark->net.w*dark->net.h*dark->net.c;
+		val.X.vals = calloc(val.X.rows, sizeof(float*));
+		val.X.vals = imgBatch;
+
+		// Image Classification
+		matrix pred = network_predict_data(dark->net, val);
+
+		// Save Prediction Result to send back to VisionWorks
+		printf("\nLabel_   : %s  %s  %s  %s  %s   %s  %s ", labels[0], labels[1], labels[2], labels[3], labels[4], labels[5], labels[6]);
+		for (int i = 0; i < pred.rows; ++i)
+		{
+			float max = 0;
+			int maxLabel = -1;
+			printf("\nLabel_#.%d :", curr + i);
+			for (int j = 0; j < pred.cols; ++j)
+			{
+				for (int m = 20; m < args.h; m++)
+				{
+					for (int n = 0; n < args.w; n++)
+					{
+						img->imageData[m*args.w*3 + n*3  ] = (unsigned char)(val.X.vals[i][(m)*(args.w) + n ]*255);
+						img->imageData[m*args.w*3 + n*3+1] = (unsigned char)(val.X.vals[i][(m)*(args.w) + n + (args.w)*(args.h)] * 255);
+						img->imageData[m*args.w*3 + n*3+2] = (unsigned char)(val.X.vals[i][(m)*(args.w) + n + (args.w)*(args.h)*2] * 255);
+
+					}
+				}
+				for (int m = 0; m < 20; m++)
+				{
+					for (int n = 0; n < args.w; n++)
+					{
+						img->imageData[m*args.w * 3 + n * 3]     =0;
+						img->imageData[m*args.w * 3 + n * 3 + 1] =0;
+						img->imageData[m*args.w * 3 + n * 3 + 2] =0;
+
+					}
+				}
+
+				dark->predictionResult[curr + i][j] = pred.vals[i][j];
+				printf("%0.3f   ",pred.vals[i][j]);
+			
+				if (max < dark->predictionResult[curr + i][j])
+				{
+					max = dark->predictionResult[curr + i][j];
+					maxLabel = j;
+				}
+			}
+			char text[255];
+			sprintf(text, "%s (%0.3f)", labels[maxLabel], max);
+			CvFont font;
+			cvInitFont(&font, CV_FONT_HERSHEY_SIMPLEX , 0.5, 0.5,0,0.8,0);
+			cvPutText(img, text, cvPoint(10, 13), &font, cvScalar(0, 255, 0,0));
+
+			cvShowImage("img", img);
+			char c = cvWaitKey(0);
+			if(c == 'a')	i -= 2;
+			else if (c == '1')	i += 10;
+			else if (c == 'n')	i += pred.rows;
+			else if (c == 's')
+			{
+				char name[100];
+				int p[3] = { CV_IMWRITE_JPEG_QUALITY,100,0 };
+				sprintf(name, "C:/WISVision/ADC_Model/%s/%d_%s(%0.3f).jpg", dark->m_strModelName, curr+i,labels[maxLabel],max);
+				cvSaveImage(name, img, p);
+			}
+			else if (c == 27) return true;
+			if (i < 0)i = 0;
+		}
+
+		// Free allocated memory
+		free_matrix(pred);
+		free_data(val);
+	}
+	//fprintf(stderr, "%lf seconds, %d images, %d total\n", sec(clock() - time), val.X.rows, curr - dark->net.batch + val.X.rows);
+
+	// free GPU memory
+	free_network(dark->net);
+	return SUCCESS;
+}
 #else
-void test_classifier(char *datacfg, char *cfgfile, char *weightfile, DarkNet *dark)
+
+
+int test_classifier(char *datacfg, char *cfgfile, char *weightfile, DarkNet *dark)
 {
     int curr = 0;
 	network net;
+	DarkError darkerror;
 	if (!dark->m_bConfigLoaded)
 	{
+		FILE *file = fopen(cfgfile, "r");
+		if (file == 0) return CFG_LOAD_FAIL;
+		else   fclose(file);
 		net = parse_network_cfg(cfgfile); //네트워크 불러오기
 		dark->m_bConfigLoaded = true;
 	}
  
     if(!dark->m_bWeightLoaded && weightfile)
 	{
+		FILE *file = fopen(weightfile, "r");
+		if (file == 0) return WEIGHT_LOAD_FAIL;
+		else   fclose(file);
         load_weights(&net, weightfile);
 		dark->m_bWeightLoaded = true;
 	}
@@ -926,6 +1108,10 @@ void test_classifier(char *datacfg, char *cfgfile, char *weightfile, DarkNet *da
     int m = plist->size; // 전체 이미지 몇장인지
     free_list(plist);    
 
+	list *options = read_data_cfg(datacfg);
+	int classes= option_find_int(options, "classes", 2);
+
+
     clock_t time;
 
     data val, buffer;
@@ -934,7 +1120,7 @@ void test_classifier(char *datacfg, char *cfgfile, char *weightfile, DarkNet *da
     args.w = net.w;
     args.h = net.h;
     args.paths = paths;
-    args.classes = dark->m_nClassNum;
+    args.classes = classes;
     args.n = net.batch;
     args.m = 0;
     args.labels = 0;
@@ -990,6 +1176,7 @@ void test_classifier(char *datacfg, char *cfgfile, char *weightfile, DarkNet *da
 	system("pause");
 	free_network(net);
 	system("pause");
+	return true;
 }
 #endif
 
@@ -1273,9 +1460,10 @@ void demo_classifier(char *datacfg, char *cfgfile, char *weightfile, int cam_ind
 }
 
 //#ifndef MAKE_DLL
-void run_classifier(int argc, char **argv, DarkNet *dark)
+int run_classifier(int argc, char **argv, DarkNet *dark)
 {
-    if(argc < 4){
+	DarkError darkerror;
+	if(argc < 4){
         fprintf(stderr, "usage: %s %s [train/test/valid] [cfg] [weights (optional)]\n", argv[0], argv[1]);
         return;
     }
@@ -1326,7 +1514,7 @@ void run_classifier(int argc, char **argv, DarkNet *dark)
 #ifdef MAKE_DLL
 	else if (0 == strcmp(argv[2], "test")) test_classifier(dark);
 #else
-    else if(0==strcmp(argv[2], "test")) test_classifier(data, cfg, weights, dark);
+    else if(0==strcmp(argv[2], "test")) darkerror=test_classifier(data, cfg, weights, dark);
 #endif
     else if(0==strcmp(argv[2], "valid")) validate_classifier_single(data, cfg, weights,dark);
 
@@ -1334,6 +1522,7 @@ void run_classifier(int argc, char **argv, DarkNet *dark)
     else if(0==strcmp(argv[2], "valid10")) validate_classifier_10(data, cfg, weights);
     else if(0==strcmp(argv[2], "validcrop")) validate_classifier_crop(data, cfg, weights);
     else if(0==strcmp(argv[2], "validfull")) validate_classifier_full(data, cfg, weights);
+	return darkerror;
 }
 //#endif
 
