@@ -979,6 +979,7 @@ image random_crop_image(image im, int w, int h)
 
 image random_augment_image(image im, float angle, float aspect, int low, int high, int size)
 {
+
     aspect = rand_scale(aspect);
     int r = rand_int(low, high);
     int min = (im.h < im.w*aspect) ? im.h : im.w*aspect;

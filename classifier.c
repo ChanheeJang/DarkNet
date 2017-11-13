@@ -1072,6 +1072,169 @@ void test_classifier_valid(DarkNet *dark)
 	free_network(dark->net);
 	return SUCCESS;
 }
+
+
+
+int get_classified_image(DarkNet *dark) 
+{
+	SYSTEMTIME st;
+	GetSystemTime(&st);
+	int curr = 0;
+	char datafile[100];
+	char cfgfile[100];
+	char weightfile[100];
+	char label[100];
+	sprintf(datafile, "C:/WISVision/ADC_Model/%s/%s.data", dark->m_strModelName, dark->m_strModelName);
+	sprintf(cfgfile, "C:/WISVision/ADC_Model/%s/%s.cfg", dark->m_strModelName, dark->m_strModelName);
+	sprintf(weightfile, "C:/WISVision/ADC_Model/%s/%s.weights", dark->m_strModelName, dark->m_strModelName);
+	sprintf(label, "C:/WISVision/ADC_Model/%s/%s.list", dark->m_strModelName, dark->m_strModelName);
+
+
+	char TimeDir[100];
+	char rcpDir[100];
+	CreateDirectory("C:/WISVision/ADC_Model/savedIMG/", NULL);
+	sprintf(TimeDir, "C:/WISVision/ADC_Model/savedIMG/%d_%d_%d", st.wYear, st.wMonth, st.wDay);
+	sprintf(rcpDir, "%s/%d_%d", TimeDir,st.wHour,st.wMinute);
+
+	list *options = read_data_cfg(datafile);
+	*dark->m_pClassNum = option_find_int(options, "classes", 2);
+
+	char **labels = get_labels(label);
+
+	CreateDirectory(TimeDir, NULL);
+	CreateDirectory(rcpDir, NULL);
+
+	char** labelPath = (char**)malloc(sizeof(char*) * (*dark->m_pClassNum));
+	for (int i = 0; i < (*dark->m_pClassNum); i++)
+	{
+		labelPath[i] = (char*)malloc(sizeof(char) * 100);
+	}
+	for (int i = 0; i < (*dark->m_pClassNum); i++)
+	{
+		sprintf(labelPath[i], "%s/%d_%s", rcpDir, i, labels[i]);
+		CreateDirectory(labelPath[i], NULL);
+	}
+
+	if (!dark->m_bConfigLoaded)
+	{
+		FILE *file = fopen(cfgfile, "r");
+		if (file == 0) return CFG_LOAD_FAIL;
+		else   fclose(file);
+		dark->net = parse_network_cfg(cfgfile); //네트워크 불러오기
+		dark->m_bConfigLoaded = true;
+	}
+
+	if (!dark->m_bWeightLoaded && weightfile)
+	{
+		FILE *file = fopen(weightfile, "r");
+		if (file == 0) return WEIGHT_LOAD_FAIL;
+		else   fclose(file);
+		load_weights(&dark->net, weightfile);
+		dark->m_bWeightLoaded = true;
+	}
+
+	FILE *file = fopen(datafile, "r");
+	if (file == 0) return DATA_LOAD_FAIL;
+	else   fclose(file);
+
+	data val, buffer;
+	load_args args = { 0 };
+	args.w = dark->net.w;
+	args.h = dark->net.h;
+	args.paths = NULL; //  (char **)list_to_array(plist);
+	args.classes = *(dark->m_pClassNum);
+	args.n = dark->net.batch;
+	args.m = 0;
+	args.labels = 0;
+	args.d = &buffer;
+	args.type = OLD_CLASSIFICATION_DATA;
+
+	pthread_t load_thread = load_data_in_thread(args, dark);
+
+	srand(time(0));
+	clock_t time;
+	time = clock();
+	IplImage *img = cvCreateImage(cvSize(args.w, args.h), IPL_DEPTH_8U, 3);
+
+
+	for (curr = 0; curr < dark->m_nTotalDefectImage; curr += dark->net.batch)
+	{
+		// allocate image buffer 
+		float **imgBatch = (float**)malloc(sizeof(float*) * dark->net.batch);
+		for (int i = 0; i < dark->net.batch; i++)
+			imgBatch[i] = (float*)malloc(sizeof(float) * dark->net.w * dark->net.h * dark->net.c);
+
+		pthread_join(load_thread, 0);
+		val = buffer;
+
+		if (curr < dark->m_nTotalDefectImage)
+		{
+			if (curr + dark->net.batch > dark->m_nTotalDefectImage) args.n = dark->m_nTotalDefectImage - curr;
+			load_thread = load_data_in_thread(args);
+		}
+		//fprintf(stderr, "Loaded: %d images in %lf seconds\n", val.X.rows, sec(clock() - time));
+
+		//Resize Image Data to Fit Current Network
+		extractImageBatch(dark->m_ppDefectImg, dark->m_nDefectImgWidth, dark->m_nDefectImgHeight, imgBatch, curr, dark->net.batch, dark->net.w, true);
+
+		val.X.rows = args.n;
+		val.X.cols = dark->net.w*dark->net.h*dark->net.c;
+		val.X.vals = calloc(val.X.rows, sizeof(float*));
+		val.X.vals = imgBatch;
+
+		// Image Classification
+		matrix pred = network_predict_data(dark->net, val);
+
+		// Save Prediction Result to send back to VisionWorks
+		printf("\nLabel_   : %s  %s  %s  %s  %s   %s  %s ", labels[0], labels[1], labels[2], labels[3], labels[4], labels[5], labels[6]);
+		for (int i = 0; i < pred.rows; ++i)
+		{
+			float max = 0;
+			int maxLabel = -1;
+			printf("\nLabel_#.%d :", curr + i);
+			for (int j = 0; j < pred.cols; ++j)
+			{
+				for (int m = 0; m < args.h; m++)
+				{
+					for (int n = 0; n < args.w; n++)
+					{
+						img->imageData[m*args.w * 3 + n * 3] = (unsigned char)(val.X.vals[i][(m)*(args.w) + n] * 255);
+						img->imageData[m*args.w * 3 + n * 3 + 1] = (unsigned char)(val.X.vals[i][(m)*(args.w) + n + (args.w)*(args.h)] * 255);
+						img->imageData[m*args.w * 3 + n * 3 + 2] = (unsigned char)(val.X.vals[i][(m)*(args.w) + n + (args.w)*(args.h) * 2] * 255);
+					}
+				}
+
+				dark->predictionResult[curr + i][j] = pred.vals[i][j];
+				printf("%0.3f   ", pred.vals[i][j]);
+
+				if (max < dark->predictionResult[curr + i][j])
+				{
+					max = dark->predictionResult[curr + i][j];
+					maxLabel = j;
+				}
+			}
+
+			char name[100];
+			int p[3] = { CV_IMWRITE_JPEG_QUALITY,100,0 };
+			sprintf(name, "%s/%s(%0.3f)_%d.jpg", labelPath[maxLabel],  labels[maxLabel], max, curr + i);
+			cvSaveImage(name, img, p);
+		}
+
+		// Free allocated memory
+		free_matrix(pred);
+		free_data(val);
+	}
+	//fprintf(stderr, "%lf seconds, %d images, %d total\n", sec(clock() - time), val.X.rows, curr - dark->net.batch + val.X.rows);
+
+	// free GPU memory
+	free_network(dark->net);
+	for (size_t i = 0; i < (*dark->m_pClassNum); i++)
+	{
+		free(labelPath[i]);
+	}
+	free(labelPath);
+	return SUCCESS;
+}
 #else
 
 
@@ -1110,8 +1273,10 @@ int test_classifier(char *datacfg, char *cfgfile, char *weightfile, DarkNet *dar
 
 	list *options = read_data_cfg(datacfg);
 	int classes= option_find_int(options, "classes", 2);
-
-
+	net.batch = 128;
+	dark->net.batch = 128;
+	dark->net.subdivisions = 1;
+	net.subdivisions=1;
     clock_t time;
 
     data val, buffer;
@@ -1128,7 +1293,7 @@ int test_classifier(char *datacfg, char *cfgfile, char *weightfile, DarkNet *dar
     args.type = OLD_CLASSIFICATION_DATA;
 
     pthread_t load_thread = load_data_in_thread(args);
-	m = 102;
+	m = 702;
 
     for(curr = 0; curr < m+net.batch-1; curr += net.batch)
 	{
@@ -1150,7 +1315,7 @@ int test_classifier(char *datacfg, char *cfgfile, char *weightfile, DarkNet *dar
         }
         fprintf(stderr, "Loaded: %d images in %lf seconds\n", val.X.rows, sec(clock()-time));
 
-		dark->net.batch = 64;
+	 
 
 	    time=clock();                                   
 		val.X.rows = args.n;
@@ -1514,7 +1679,7 @@ int run_classifier(int argc, char **argv, DarkNet *dark)
 #ifdef MAKE_DLL
 	else if (0 == strcmp(argv[2], "test")) test_classifier(dark);
 #else
-    else if(0==strcmp(argv[2], "test")) darkerror=test_classifier(data, cfg, weights, dark);
+    else if(0==strcmp(argv[2], "test")) darkerror= test_classifier(data, cfg, weights, dark);
 #endif
     else if(0==strcmp(argv[2], "valid")) validate_classifier_single(data, cfg, weights,dark);
 
@@ -1524,44 +1689,5 @@ int run_classifier(int argc, char **argv, DarkNet *dark)
     else if(0==strcmp(argv[2], "validfull")) validate_classifier_full(data, cfg, weights);
 	return darkerror;
 }
-//#endif
-
-//
-//#ifdef MAKE_DLL
-//#include "darkWrapper.h"
-//void run_classifier(DarkNet dark)
-//{
-// 
-//	int gpu = gpu_index;
-//	int *gpus = &gpu;
-//	int ngpus = 1;
-//  
-//	int clear = dark.m_bClearImgSeen;
-//	char *data = dark.m_strDataPath;
-//	char *cfg = dark.m_strCfgPath;
-//	char *weights = (argc > 5) ? argv[5] : 0;
-//	char *filename = (argc > 6) ? argv[6] : 0;
-//	char *layer_s = (argc > 7) ? argv[7] : 0;
-//	int layer = layer_s ? atoi(layer_s) : -1;
-//
-//	if (0 == strcmp(argv[2], "predict")) predict_classifier(data, cfg, weights, filename, top);
-//	else if (0 == strcmp(argv[2], "try")) try_classifier(data, cfg, weights, filename, atoi(layer_s));
-//
-//	else if (0 == strcmp(argv[2], "train")) train_classifier(data, cfg, weights, gpus, ngpus, clear);
-//
-//	else if (0 == strcmp(argv[2], "demo")) demo_classifier(data, cfg, weights, cam_index, filename);
-//	else if (0 == strcmp(argv[2], "gun")) gun_classifier(data, cfg, weights, cam_index, filename);
-//	else if (0 == strcmp(argv[2], "threat")) threat_classifier(data, cfg, weights, cam_index, filename);
-//	else if (0 == strcmp(argv[2], "label")) label_classifier(data, cfg, weights);
-//
-//	else if (0 == strcmp(argv[2], "test")) test_classifier(data, cfg, weights, layer);
-//
-//	else if (0 == strcmp(argv[2], "valid")) validate_classifier_single(data, cfg, weights);
-//
-//	else if (0 == strcmp(argv[2], "validmulti")) validate_classifier_multi(data, cfg, weights);
-//	else if (0 == strcmp(argv[2], "valid10")) validate_classifier_10(data, cfg, weights);
-//	else if (0 == strcmp(argv[2], "validcrop")) validate_classifier_crop(data, cfg, weights);
-//	else if (0 == strcmp(argv[2], "validfull")) validate_classifier_full(data, cfg, weights);
-//}
-//#endif
-// 
+ 
+ 
